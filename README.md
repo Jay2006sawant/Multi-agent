@@ -1,64 +1,56 @@
-# Multi-Agent Study Planner
+# Multi-Agent Travel Itinerary Generator
 
-A LangChain + LangGraph based multi-agent system that generates a practical study roadmap from a user's learning goal.
+A deterministic multi-agent system built with LangChain + LangGraph that converts a travel request into a practical day-wise itinerary.
 
-This project is designed for the "Build a Multi-Agent System" assignment and follows the required architecture:
-- 4 agents with clear roles
-- LangGraph workflow with nodes and edges
-- Shared state across agents
-- Dynamic terminal input
-- Single Python entry file: `multi_agent_system.py`
+## Why This Project
+
+This repository is built for the assignment requirement: build one multi-agent system using LangChain and LangGraph with clear role separation and orchestration.
 
 ## Use Case
 
-Given a goal such as:
+Input example:
 
 ```text
-I want to learn machine learning in 4 weeks with 2 hours daily.
+Plan a 5 day trip to Jaipur with budget 25000 and focus on food and culture.
 ```
 
-the system collaborates across multiple agents to produce:
-- learner profile and constraints
-- topic breakdown (beginner/intermediate/advanced)
-- 4-week study plan
-- review and improvement notes
+Output includes:
+- traveler profile and constraints
+- destination strategy
+- day-wise itinerary
+- budget optimization tips
 
 ## Tech Stack
 
 - Python 3.10+
 - LangChain
 - LangGraph
-- langchain-ollama
-- python-dotenv
-- Ollama (optional but recommended for real LLM output)
 
 ## Project Structure
 
 ```text
 Multi-agent/
-├── multi_agent_system.py   # Main assignment implementation
+├── multi_agent_system.py
 ├── requirements.txt
-├── .env.example
 └── README.md
 ```
 
-## Agent Design
+## Agent Roles
 
-`multi_agent_system.py` contains five nodes in the graph:
+`multi_agent_system.py` contains these role-based agents:
+1. `traveler_profile_agent` - extracts trip duration, budget, planning preferences
+2. `destination_research_agent` - creates destination-focused activity plan
+3. `itinerary_agent` - builds a day-by-day schedule
+4. `budget_optimizer_agent` - adds spend-control and risk-control suggestions
+5. `formatter_agent` - prepares final combined response
 
-1. `profile_agent` - extracts user constraints and learner profile
-2. `curriculum_agent` - creates a topic roadmap
-3. `planner_agent` - builds a week-by-week actionable plan
-4. `reviewer_agent` - critiques and improves the plan
-5. `formatter_agent` - combines all outputs into a final report
-
-## Workflow (LangGraph)
+## LangGraph Workflow
 
 ```text
-profile_agent -> curriculum_agent -> planner_agent -> reviewer_agent -> formatter_agent -> END
+traveler_profile_agent -> destination_research_agent -> itinerary_agent -> budget_optimizer_agent -> formatter_agent -> END
 ```
 
-All intermediate outputs are stored in shared `AgentState` and passed to the next node.
+Each node reads and updates a shared `AgentState`.
 
 ## Setup
 
@@ -69,72 +61,22 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Run with Ollama (Real LLM Output)
-
-Start Ollama server:
-
-```bash
-ollama serve
-```
-
-In another terminal, pull model:
-
-```bash
-ollama pull llama3.2
-```
-
-Optional env config:
-
-```bash
-cp .env.example .env
-```
-
-Then run:
+## Run
 
 ```bash
 python3 multi_agent_system.py
 ```
 
-## Run Without Ollama (Fallback/Mock)
+## Assignment Requirement Mapping
 
-This project includes resilient fallback responses, so it can still run even when Ollama/model is unavailable.
-
-You can explicitly force mock mode:
-
-```bash
-USE_MOCK_MODE=true python3 multi_agent_system.py
-```
-
-## Example Output Sections
-
-The terminal output contains:
-- `User Goal`
-- `1) Learner Profile Agent Output`
-- `2) Curriculum Agent Output`
-- `3) Planner Agent Output`
-- `4) Reviewer Agent Output`
-
-## Assignment Checklist Mapping
-
-- 3-4 agents with clear roles: Yes (4 core role agents)
+- 3-4 agents with clear roles: Yes (4 core agents)
 - LangGraph nodes and edges: Yes
 - Shared state/context passing: Yes (`AgentState`)
-- Main function: Yes (`main()`)
+- `main()` function: Yes
 - Dynamic user input: Yes (`input(...)`)
 - Single Python file: Yes (`multi_agent_system.py`)
 
-## Troubleshooting
-
-- **Ollama server not running**
-  - Run: `ollama serve`
-- **Model missing**
-  - Run: `ollama pull llama3.2`
-- **No internet / model pull fails**
-  - Use: `USE_MOCK_MODE=true python3 multi_agent_system.py`
-- **Virtual environment not active**
-  - Run: `source .venv/bin/activate`
-
 ## Notes
 
-- `.venv` and `.env` are ignored in git through `.gitignore`.
-- This repository is focused on assignment clarity, code readability, and reproducible terminal demo.
+- This implementation is deterministic for reliable demo output.
+- `.venv` is ignored by `.gitignore`.

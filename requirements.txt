@@ -1,4 +1,2 @@
 langchain
 langgraph
-langchain-ollama
-python-dotenv

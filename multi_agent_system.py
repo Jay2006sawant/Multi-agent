@@ -1,190 +1,125 @@
 """
 Multi-agent assignment implementation using LangChain + LangGraph.
 
-Use case: Study planner assistant.
+Use case: Travel itinerary generator.
 """
 
 from __future__ import annotations
 
-import os
+import re
 from typing import Dict, TypedDict
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from dotenv import load_dotenv
+from langchain_core.prompts import PromptTemplate
 from langgraph.graph import END, StateGraph
-from langchain_ollama import ChatOllama
 
 
 class AgentState(TypedDict):
-    user_goal: str
-    profile: str
-    topic_breakdown: str
-    study_plan: str
-    review_notes: str
+    user_request: str
+    traveler_profile: str
+    destination_plan: str
+    itinerary_plan: str
+    budget_tips: str
     final_output: str
 
 
-def _use_mock_mode() -> bool:
-    """Enable mock mode explicitly or when no Ollama server is reachable."""
-    return os.getenv("USE_MOCK_MODE", "false").lower() == "true"
+def _extract_trip_days(user_request: str) -> int:
+    match = re.search(r"(\d+)\s*[- ]?\s*day", user_request, flags=re.IGNORECASE)
+    if match:
+        return max(1, int(match.group(1)))
+    return 4
 
 
-def _build_llm() -> ChatOllama:
-    """Create an Ollama client with a local default model."""
-    model = os.getenv("OLLAMA_MODEL", "llama3.2")
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    return ChatOllama(model=model, base_url=base_url, temperature=0.3)
+def _extract_budget(user_request: str) -> int:
+    match = re.search(r"(?:budget|rs|inr)\s*[:=]?\s*(\d{3,7})", user_request, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return 30000
 
 
-def profile_agent(state: AgentState) -> Dict[str, str]:
-    """Agent 1: Understand learner profile and constraints."""
-    if _use_mock_mode():
-        return {
-            "profile": (
-                "- Learner level: Beginner-to-intermediate\n"
-                "- Target: Complete requested learning goal with practical readiness\n"
-                "- Time constraints: Follow timeline from user goal\n"
-                "- Preference: Hands-on + revision-based schedule"
-            )
-        }
-    try:
-        llm = _build_llm()
-        prompt = (
-            "You are a learner-profile agent. Extract constraints and goals from the user request. "
-            "Return concise bullet points for: learner level, target, time constraints, and preferences."
+def _extract_destination(user_request: str) -> str:
+    patterns = [
+        r"(?:trip\s+to|travel\s+to|visit)\s+([A-Za-z][A-Za-z ]{1,30}?)(?=\s+(?:with|for|in|on|and|budget)\b|[.,]|$)",
+        r"(?:to|in)\s+([A-Za-z][A-Za-z ]{1,30}?)(?=\s+(?:with|for|on|and|budget)\b|[.,]|$)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, user_request, flags=re.IGNORECASE)
+        if not match:
+            continue
+        destination = match.group(1).strip(" .,!?:;")
+        if len(destination) >= 3:
+            return destination.title()
+    return "Your Chosen City"
+
+
+def traveler_profile_agent(state: AgentState) -> Dict[str, str]:
+    """Agent 1: Extract traveler profile and trip constraints."""
+    user_request = state["user_request"]
+    days = _extract_trip_days(user_request)
+    budget = _extract_budget(user_request)
+
+    profile = (
+        f"- Trip duration: {days} days\n"
+        f"- Budget estimate: INR {budget}\n"
+        "- Travel style: Balanced sightseeing + local experiences\n"
+        "- Planning preference: Practical daily schedule with realistic pacing"
+    )
+    return {"traveler_profile": profile}
+
+
+def destination_research_agent(state: AgentState) -> Dict[str, str]:
+    """Agent 2: Build a destination-focused activity plan."""
+    destination = _extract_destination(state["user_request"])
+    plan = (
+        f"Destination: {destination}\n"
+        "- Must include: iconic attraction, local market, local food spot\n"
+        "- Add one cultural experience and one relaxed evening activity\n"
+        "- Keep commute-friendly grouping of places by area"
+    )
+    return {"destination_plan": plan}
+
+
+def itinerary_agent(state: AgentState) -> Dict[str, str]:
+    """Agent 3: Convert constraints into day-wise itinerary."""
+    days = _extract_trip_days(state["user_request"])
+    destination = _extract_destination(state["user_request"])
+
+    sections = []
+    for day in range(1, days + 1):
+        sections.append(
+            f"Day {day}:\n"
+            f"- Morning: Key {destination} sightseeing cluster\n"
+            "- Afternoon: Local food + nearby exploration\n"
+            "- Evening: Relaxed activity and next-day prep"
         )
-        response = llm.invoke([SystemMessage(content=prompt), HumanMessage(content=state["user_goal"])])
-        return {"profile": response.content}
-    except Exception:
-        return {
-            "profile": (
-                "- Learner level: Not explicitly provided\n"
-                "- Target: " + state["user_goal"] + "\n"
-                "- Time constraints: Derived from user prompt\n"
-                "- Preference: Structured daily plan with checkpoints"
-            )
-        }
+    return {"itinerary_plan": "\n\n".join(sections)}
 
 
-def curriculum_agent(state: AgentState) -> Dict[str, str]:
-    """Agent 2: Convert goals into a topic roadmap."""
-    if _use_mock_mode():
-        return {
-            "topic_breakdown": (
-                "Beginner:\n"
-                "- Fundamentals and core concepts\n"
-                "- Problem-solving basics\n"
-                "- Tooling and environment setup\n\n"
-                "Intermediate:\n"
-                "- Pattern-based practice\n"
-                "- Timed exercises and analysis\n"
-                "- Mini implementation tasks\n\n"
-                "Advanced:\n"
-                "- Mixed difficulty challenges\n"
-                "- Mock interview/project simulation\n"
-                "- Weak-area reinforcement"
-            )
-        }
-    try:
-        llm = _build_llm()
-        prompt = (
-            "You are a curriculum designer agent. Using the profile below, create a practical topic breakdown. "
-            "Organize into beginner, intermediate, advanced sections with 3-5 items each.\n\n"
-            f"Profile:\n{state['profile']}"
-        )
-        response = llm.invoke([SystemMessage(content=prompt), HumanMessage(content=state["user_goal"])])
-        return {"topic_breakdown": response.content}
-    except Exception:
-        return {
-            "topic_breakdown": (
-                "Beginner:\n- Learn fundamentals\n- Practice easy tasks\n\n"
-                "Intermediate:\n- Solve medium tasks\n- Build speed and consistency\n\n"
-                "Advanced:\n- Solve hard tasks\n- Simulate real evaluation rounds"
-            )
-        }
+def budget_optimizer_agent(state: AgentState) -> Dict[str, str]:
+    """Agent 4: Provide budget and risk-control recommendations."""
+    budget = _extract_budget(state["user_request"])
+    tips_template = PromptTemplate.from_template(
+        "Budget limit INR {budget}. Provide concise budget control tips."
+    )
+    _ = tips_template.format(budget=budget)
 
-
-def planner_agent(state: AgentState) -> Dict[str, str]:
-    """Agent 3: Generate a week-by-week actionable plan."""
-    if _use_mock_mode():
-        return {
-            "study_plan": (
-                "Week 1: Foundation\n"
-                "- Daily: 90 min concept study + 30 min practice\n"
-                "- Checkpoint: End-of-week quiz\n\n"
-                "Week 2: Core practice\n"
-                "- Daily: 2 focused practice blocks\n"
-                "- Checkpoint: Timed set\n\n"
-                "Week 3: Applied work\n"
-                "- Daily: Mixed practice + review log\n"
-                "- Mini-project/mock task implementation\n\n"
-                "Week 4: Revision and assessment\n"
-                "- Daily: Weak-topic drills + mocks\n"
-                "- Final review and improvement plan"
-            )
-        }
-    try:
-        llm = _build_llm()
-        prompt = (
-            "You are a study-planner agent. Build a 4-week plan with daily tasks, revision checkpoints, "
-            "and one mini-project. Keep it realistic and focused.\n\n"
-            f"Profile:\n{state['profile']}\n\n"
-            f"Topic Breakdown:\n{state['topic_breakdown']}"
-        )
-        response = llm.invoke([SystemMessage(content=prompt), HumanMessage(content=state["user_goal"])])
-        return {"study_plan": response.content}
-    except Exception:
-        return {
-            "study_plan": (
-                "Week 1: Basics and setup\n"
-                "Week 2: Core exercises\n"
-                "Week 3: Intermediate practice + mini project\n"
-                "Week 4: Revision, mocks, and final improvement"
-            )
-        }
-
-
-def reviewer_agent(state: AgentState) -> Dict[str, str]:
-    """Agent 4: Improve quality and detect overload/risk."""
-    if _use_mock_mode():
-        return {
-            "review_notes": (
-                "- Keep one buffer day weekly to avoid overload.\n"
-                "- Track daily progress in a short log.\n"
-                "- Spend 20% time on revision.\n"
-                "- Increase difficulty only after consistency."
-            )
-        }
-    try:
-        llm = _build_llm()
-        prompt = (
-            "You are a reviewer agent. Critique the plan for overload, missing fundamentals, and unclear tasks. "
-            "Then provide improved final recommendations in concise bullets.\n\n"
-            f"Profile:\n{state['profile']}\n\n"
-            f"Topic Breakdown:\n{state['topic_breakdown']}\n\n"
-            f"Study Plan:\n{state['study_plan']}"
-        )
-        response = llm.invoke([SystemMessage(content=prompt)])
-        return {"review_notes": response.content}
-    except Exception:
-        return {
-            "review_notes": (
-                "- Reduce daily load if fatigue appears.\n"
-                "- Keep one revision checkpoint every week.\n"
-                "- Focus first on weak areas from practice results."
-            )
-        }
+    tips = (
+        f"- Set daily spend cap around INR {max(1000, budget // max(1, _extract_trip_days(state['user_request'])))}.\n"
+        "- Book local transport passes instead of repeated cab hires.\n"
+        "- Keep one buffer block for delays or weather changes.\n"
+        "- Pre-select two affordable food options near each sightseeing cluster."
+    )
+    return {"budget_tips": tips}
 
 
 def formatter_agent(state: AgentState) -> Dict[str, str]:
     """Final node: present all agent outputs as one report."""
     final_report = (
-        "=== Multi-Agent Study Planner ===\n\n"
-        f"User Goal:\n{state['user_goal']}\n\n"
-        f"1) Learner Profile Agent Output:\n{state['profile']}\n\n"
-        f"2) Curriculum Agent Output:\n{state['topic_breakdown']}\n\n"
-        f"3) Planner Agent Output:\n{state['study_plan']}\n\n"
-        f"4) Reviewer Agent Output:\n{state['review_notes']}\n"
+        "=== Multi-Agent Travel Itinerary Generator ===\n\n"
+        f"Traveler Request:\n{state['user_request']}\n\n"
+        f"1) Traveler Profile Agent Output:\n{state['traveler_profile']}\n\n"
+        f"2) Destination Research Agent Output:\n{state['destination_plan']}\n\n"
+        f"3) Itinerary Agent Output:\n{state['itinerary_plan']}\n\n"
+        f"4) Budget Optimizer Agent Output:\n{state['budget_tips']}\n"
     )
     return {"final_output": final_report}
 
@@ -193,37 +128,35 @@ def build_graph():
     """Construct LangGraph workflow with shared state across agents."""
     workflow = StateGraph(AgentState)
 
-    workflow.add_node("profile_agent", profile_agent)
-    workflow.add_node("curriculum_agent", curriculum_agent)
-    workflow.add_node("planner_agent", planner_agent)
-    workflow.add_node("reviewer_agent", reviewer_agent)
+    workflow.add_node("traveler_profile_agent", traveler_profile_agent)
+    workflow.add_node("destination_research_agent", destination_research_agent)
+    workflow.add_node("itinerary_agent", itinerary_agent)
+    workflow.add_node("budget_optimizer_agent", budget_optimizer_agent)
     workflow.add_node("formatter_agent", formatter_agent)
 
-    workflow.set_entry_point("profile_agent")
-    workflow.add_edge("profile_agent", "curriculum_agent")
-    workflow.add_edge("curriculum_agent", "planner_agent")
-    workflow.add_edge("planner_agent", "reviewer_agent")
-    workflow.add_edge("reviewer_agent", "formatter_agent")
+    workflow.set_entry_point("traveler_profile_agent")
+    workflow.add_edge("traveler_profile_agent", "destination_research_agent")
+    workflow.add_edge("destination_research_agent", "itinerary_agent")
+    workflow.add_edge("itinerary_agent", "budget_optimizer_agent")
+    workflow.add_edge("budget_optimizer_agent", "formatter_agent")
     workflow.add_edge("formatter_agent", END)
 
     return workflow.compile()
 
 
 def main():
-    load_dotenv()
-
-    user_input = input("Enter your learning goal (dynamic input): ").strip()
+    user_input = input("Enter your travel request (dynamic input): ").strip()
     if not user_input:
         raise ValueError("Input cannot be empty.")
 
     graph = build_graph()
 
     initial_state: AgentState = {
-        "user_goal": user_input,
-        "profile": "",
-        "topic_breakdown": "",
-        "study_plan": "",
-        "review_notes": "",
+        "user_request": user_input,
+        "traveler_profile": "",
+        "destination_plan": "",
+        "itinerary_plan": "",
+        "budget_tips": "",
         "final_output": "",
     }
 
